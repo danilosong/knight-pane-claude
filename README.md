@@ -7,6 +7,8 @@ Ele luta, forja, explora e conjura de acordo com o que o Claude está fazendo, e
 
 ![Painel do Knight Pane](docs/preview.png)
 
+![Tarefas dos agentes](docs/tasks.png)
+
 *Imagem ilustrativa do painel, renderizada a partir dos mesmos sprites do mod.*
 
 </div>
@@ -46,7 +48,19 @@ Só as ferramentas da conversa principal contam: o trabalho de subagentes não m
 
 ## 📋 Barras de tarefas dos agentes
 
-Cada agente ou subagente em andamento ganha uma barra com o seu título:
+Cada agente ou subagente em andamento ganha uma barra com o seu título. Veja como fica, com um agente principal e dois subagentes trabalhando ao mesmo tempo:
+
+![Barras de tarefas animadas](docs/tasks.gif)
+
+*Imagem ilustrativa: o painel real é desenhado no terminal com blocos coloridos, mas o visual segue a mesma lógica.*
+
+A cor da barra muda conforme ela enche:
+
+| 0% | ~35% | ~65% | 100% |
+|---|---|---|---|
+| 🟥 vermelho | 🟧 laranja | 🟨 amarelo | 🟩 verde, com ✓ |
+
+Legenda: `◆` é o agente principal, `↳` é um subagente (com o tipo dele ao lado) e `~` marca uma porcentagem estimada.
 
 - **Título:** para o agente principal, a etapa em andamento da lista de tarefas (ou o começo do seu pedido); para um subagente, a descrição com que ele foi chamado, mais o tipo dele.
 - **Progresso real:** quando o agente usa uma lista de tarefas (`TodoWrite`), a porcentagem é `concluídas ÷ total`.
