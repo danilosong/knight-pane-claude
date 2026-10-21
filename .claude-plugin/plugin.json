@@ -1,0 +1,9 @@
+{
+  "name": "knight-pane",
+  "version": "0.1.0",
+  "description": "Painel lateral com um cavaleiro em pixel art que reage ao que o Claude está fazendo, com HP/MP dos limites de uso, tokens e custo.",
+  "author": { "name": "danilosong" },
+  "license": "MIT",
+  "repository": "https://github.com/danilosong/knight-pane-claude",
+  "types": "./types/index.d.ts"
+}
