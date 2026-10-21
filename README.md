@@ -21,6 +21,7 @@ Knight Pane é um **mod** do Claude Code: abre um painel lateral com um cavaleir
 - 🏆 **XP:** tokens de entrada, saída e cache da sessão.
 - 💰 **Custo:** o gasto da sessão em US$, em amarelo.
 - 📜 **Missões:** quantos turnos o cavaleiro já concluiu.
+- 📋 **Tarefas dos agentes:** uma barra de progresso para o agente principal e para cada subagente, com o título do que ele está fazendo. A barra vai de 0% a 100% e muda de cor no caminho (vermelho → laranja → amarelo → verde).
 - 🌊 **Barras animadas:** uma onda de brilho percorre a barra e, com 20% ou menos, ela pulsa em alerta.
 
 ## 🎭 Os estados do cavaleiro
@@ -42,6 +43,15 @@ Só as ferramentas da conversa principal contam: o trabalho de subagentes não m
 ![Folha de sprites](docs/sheet.png)
 
 </details>
+
+## 📋 Barras de tarefas dos agentes
+
+Cada agente ou subagente em andamento ganha uma barra com o seu título:
+
+- **Título:** para o agente principal, a etapa em andamento da lista de tarefas (ou o começo do seu pedido); para um subagente, a descrição com que ele foi chamado, mais o tipo dele.
+- **Progresso real:** quando o agente usa uma lista de tarefas (`TodoWrite`), a porcentagem é `concluídas ÷ total`.
+- **Progresso estimado:** sem lista, o Claude Code não informa quanto falta, então a barra **cresce com o número de ferramentas usadas** e para em ~90%. Esse valor aparece com um `~` (por exemplo `~45%`).
+- **Conclusão:** ao terminar, a barra vai a 100%, fica verde com um ✓ e some depois de alguns segundos.
 
 ## 📦 Instalação
 

@@ -1,10 +1,11 @@
 import { atom, read, update } from 'claude-code'
 import type { Register } from 'claude-code'
 
-import type { Limit, Totals } from '../types'
+import type { Limit, Task, Totals } from '../types'
 
 const PANE = 'knight-pane'
 const busy = atom({ plugin: 'knight-pane', key: 'busy' } as const, false)
+const tasks = atom({ plugin: 'knight-pane', key: 'tasks' } as const, [] as Task[])
 const tool = atom({ plugin: 'knight-pane', key: 'tool' } as const, '')
 const frame = atom({ plugin: 'knight-pane', key: 'frame' } as const, 0)
 const limits = atom({ plugin: 'knight-pane', key: 'limits' } as const, [] as Limit[])
@@ -824,7 +825,9 @@ const sprite = (mood: Mood, f: number): string[][] => {
   // the calm moods play at half speed
   const seq = SEQUENCE[mood]
   const step = Math.floor(mood === 'idle' || mood === 'think' ? f / 2 : f)
-  return FRAMES[MOOD_ORDER.indexOf(mood)][seq[step % seq.length]].map(r => r.split(''))
+  const row = FRAMES[MOOD_ORDER.indexOf(mood)] ?? []
+  const lines = row[seq[step % seq.length] ?? 0] ?? []
+  return lines.map(r => r.split(''))
 }
 
 const MOODS: Record<Mood, [string, string, string]> = {
@@ -846,6 +849,30 @@ const mix = (a: string, b: string, t: number) => {
   const ch = (i: number) => Math.round(c(a, i) + (c(b, i) - c(a, i)) * t).toString(16).padStart(2, '0')
   return `#${ch(1)}${ch(3)}${ch(5)}`
 }
+
+// --- agent task bars: real progress from a todo list, else an estimate ---
+const DONE_SHOW_MS = 8000
+const MAX_TASKS = 6
+const STOPS: [number, string][] = [[0, '#e5484d'], [35, '#f08a24'], [65, '#f2c94c'], [100, '#46c06a']]
+
+type Todo = { content: string; status: 'pending' | 'in_progress' | 'completed'; activeForm: string }
+
+// a bar that has made `calls` tool calls and has no checklist: creeps toward 90%
+const guess = (calls: number) => Math.min(90, Math.round(90 * (1 - Math.exp(-calls / 10))))
+
+const colorAt = (pct: number) => {
+  for (let i = 1; i < STOPS.length; i++) {
+    const [p0, c0] = STOPS[i - 1] ?? [0, '#e5484d']
+    const [p1, c1] = STOPS[i] ?? [100, '#46c06a']
+    if (pct <= p1) return mix(c0, c1, (pct - p0) / (p1 - p0))
+  }
+  return '#46c06a'
+}
+
+const clip = (text: string, n: number) => (text.length > n ? `${text.slice(0, n - 1)}…` : text)
+
+const upsert = (list: Task[], id: string, make: () => Task, change: (t: Task) => Task) =>
+  list.some(t => t.id === id) ? list.map(t => (t.id === id ? change(t) : t)) : [...list, change(make())]
 
 const fmt = (n: number) => n.toLocaleString('pt-BR')
 
@@ -874,6 +901,27 @@ export const register: Register = on => {
   })
 
   on('tool.call', async ($, e, next) => {
+    const id = e.agentId ?? 'main'
+    const todos = (e as { todos?: Todo[] }).todos
+    if (e.tool === 'TodoWrite' && todos && todos.length > 0) {
+      const done = todos.filter(t => t.status === 'completed').length
+      const now = todos.find(t => t.status === 'in_progress')
+      await update($, tasks, list =>
+        list.map(t =>
+          t.id === id && !t.isDone
+            ? { ...t, pct: Math.round((done / todos.length) * 100), isReal: true, title: now?.activeForm ?? t.title }
+            : t,
+        ),
+      )
+    } else if (e.tool !== 'Agent') {
+      await update($, tasks, list =>
+        list.map(t =>
+          t.id === id && !t.isDone
+            ? { ...t, calls: t.calls + 1, pct: t.isReal ? t.pct : guess(t.calls + 1) }
+            : t,
+        ),
+      )
+    }
     if (e.agentId) return next(e)
     await update($, tool, () => e.tool)
     const ran = await next(e)
@@ -881,12 +929,37 @@ export const register: Register = on => {
     return ran
   })
 
+  on('agent.spawn', async ($, e, next) => {
+    const started = await next(e)
+    if (started.agentId && !e.workflow) {
+      const id = started.agentId
+      const title = e.description || e.subagentType
+      await update($, tasks, list =>
+        upsert(list, id, () => ({ id, title, kind: 'sub', agentType: e.subagentType, pct: 0, isReal: false, calls: 0, isDone: false }), t => t),
+      )
+    }
+    return started
+  })
+
   on('turn.start', async ($, e, next) => {
-    if (!e.agentId) await update($, busy, () => true)
+    if (!e.agentId) {
+      await update($, busy, () => true)
+      const now = await $.clock.now()
+      const title = clip(e.text.replace(/\s+/g, ' ').trim() || 'Agente principal', 40)
+      await update($, tasks, list => [
+        { id: 'main', title, kind: 'main', pct: 0, isReal: false, calls: 0, isDone: false } as Task,
+        ...list.filter(t => t.id !== 'main' && (!t.isDone || now - (t.endedAt ?? now) < DONE_SHOW_MS)),
+      ])
+    }
     return next(e)
   })
 
   on('turn.complete', async ($, e, next) => {
+    const now = await $.clock.now()
+    const id = e.agentId ?? 'main'
+    await update($, tasks, list =>
+      list.map(t => (t.id === id && !t.isDone ? { ...t, pct: 100, isDone: true, endedAt: now } : t)),
+    )
     if (!e.agentId) {
       await update($, busy, () => false)
       await update($, tool, () => '')
@@ -925,8 +998,8 @@ export const register: Register = on => {
       const rows = []
       for (let y = 0; y < grid.length; y += 2) {
         const cells = []
-        for (let x = 0; x < grid[y].length; x++) {
-          const top = PALETTE[grid[y][x]]
+        for (let x = 0; x < (grid[y]?.length ?? 0); x++) {
+          const top = PALETTE[grid[y]?.[x] ?? '.']
           const bottom = PALETTE[grid[y + 1]?.[x] ?? '.']
           if (!top && !bottom) cells.push(<Text>{' '}</Text>)
           else if (top && bottom) cells.push(<Text color={top} backgroundColor={bottom}>{'▀'}</Text>)
@@ -968,6 +1041,40 @@ export const register: Register = on => {
         </Box>
       )
     }
+    const all = await read($, tasks)
+    const shown = all
+      .filter(t => !t.isDone || now - (t.endedAt ?? now) < DONE_SHOW_MS)
+      .sort((a, b) => Number(a.isDone) - Number(b.isDone))
+      .slice(0, MAX_TASKS)
+    const TASK_CELLS = 22
+    const taskRow = (t: Task) => {
+      const exact = (t.pct / 100) * TASK_CELLS
+      const whole = Math.floor(exact)
+      const part = EIGHTHS[Math.round((exact - whole) * 8) % 8]
+      const col = colorAt(t.pct)
+      const cells = []
+      for (let i = 0; i < whole; i++) {
+        const dist = ((f % (TASK_CELLS + 6)) - 2 - i + TASK_CELLS + 6) % (TASK_CELLS + 6)
+        const wave = !t.isDone && dist < 3 ? 0.5 * (1 - dist / 3) : 0
+        cells.push(<Text color={mix(col, '#ffffff', wave)}>{'█'}</Text>)
+      }
+      if (part) cells.push(<Text color={col} backgroundColor={TRACK}>{part}</Text>)
+      const rest = TASK_CELLS - whole - (part ? 1 : 0)
+      return (
+        <Box flexDirection="column" marginTop={1}>
+          <Text>
+            <Text color={col} bold>{t.isDone ? '✓' : t.kind === 'main' ? '◆' : '↳'} </Text>
+            <Text bold>{clip(t.title, 30)}</Text>
+            {t.agentType && <Text dimColor> · {clip(t.agentType, 14)}</Text>}
+          </Text>
+          <Text>
+            {cells}
+            <Text color={TRACK}>{'█'.repeat(Math.max(0, rest))}</Text>
+            <Text bold color={col}> {t.isReal || t.isDone || t.pct === 0 ? '' : '~'}{t.pct}%</Text>
+          </Text>
+        </Box>
+      )
+    }
     const five = lim.find(l => l.kind === 'five_hour')
     const seven = lim.find(l => l.kind === 'seven_day')
 
@@ -981,6 +1088,12 @@ export const register: Register = on => {
         <Box flexDirection="column" marginTop={1}>
           {bar('HP', five?.percentUsed, five?.resetsAt, '#d62839', '#ff8fa0')}
           {bar('MP', seven?.percentUsed, seven?.resetsAt, '#3a8fd6', '#9bd3ff')}
+          {shown.length > 0 && (
+            <Box flexDirection="column" marginTop={1}>
+              <Text bold>TAREFAS</Text>
+              {shown.map(taskRow)}
+            </Box>
+          )}
           <Box flexDirection="column" marginTop={1}>
             <Text><Text bold>XP </Text><Text color="#8a6fdf">{fmt(t.input + t.output)} tokens</Text></Text>
             <Text dimColor>in {fmt(t.input)} · out {fmt(t.output)} · cache {fmt(t.cache)}</Text>
